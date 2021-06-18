@@ -26,9 +26,11 @@ AC_PROG_LN_S
 AC_PROG_MAKE_SET
 
 # Checks for libraries
+AC_CHECK_LIB([ncurses], [getch])
+AC_CHECK_LIB([tinfo], [main])
 
 # Checks for header files
-AC_CHECK_HEADERS([getopt.h error.h])
+AC_CHECK_HEADERS([getopt.h error.h ncurses.h])
 
 # Checks for types
 AC_TYPE_SIZE_T
@@ -39,7 +41,7 @@ AC_TYPE_SIZE_T
 AC_C_BIGENDIAN
 
 # Checks for library functions
-AC_CHECK_FUNCS([strndup error getline])
+AC_CHECK_FUNCS([strndup error getline getch])
 
 # Checks for system services
 

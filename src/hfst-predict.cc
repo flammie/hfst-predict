@@ -1,5 +1,5 @@
 /*
- * (c) 2021 Divvun <https://divvun.org>
+ * Copyright (c) 2021 Divvun <https://divvun.org>, GPLv3
  */
 
 #if HAVE_CONFIG
@@ -8,6 +8,7 @@
 #include <hfst/hfst.h>
 #include <getopt.h>
 #include <stdio.h>
+#include <ncurses.h>
 
 #define MAX_PREDICTIONS 10
 #define TIME_CUTOFF -1
@@ -54,36 +55,44 @@ load_predictor(const char* filename)
 void
 predict(hfst::HfstTransducer* t, bool verbose)
   {
-    fprintf(stdout, "Enter alphabets or number to predict a morph, "
-            "and space to finish the word.\n");
+    printw("Enter alphabets or number to predict a morph, "
+           "and space to finish the word, enter or ^C to quit.\n");
     char* input = strdup("");
     bool predicting = true;
     std::vector<std::string> completions = std::vector<std::string>(16);
     std::set<std::string> uniqueComps;
     while (predicting)
       {
-        fprintf(stdout, "%s", input);
-        char* l = NULL;
-        size_t n = 0;
-        ssize_t len = getline(&l, &n, stdin);
-        if (len == -1)
+        printw("%s", input);
+        int c  = getch();
+        if (c == ERR)
           {
-            perror("getline");
-            break;
+            continue;
           }
-        l[len-1] = '\0';
-        if (len == 2 && (l[len-2] >= '0') && (l[len-2] <= '9'))
+        else if ((c == KEY_ENTER) || (c == '\n'))
           {
-            input = strdup(completions[l[len-2] - '0'].c_str());
-            fprintf(stdout, "Selected %c %s\n", l[len-2], input);
+            printw("\ndone.\n");
+            predicting = false;
           }
-        else {
-            input = (char*)realloc(input, sizeof(char)*(strlen(input)+len+2));
-            input = strcat(input, l);
-        }
+        if (c >= '0' && c <= '9')
+          {
+            input = strdup(completions[c - '0' + 1].c_str());
+            printw("\nSelected %c %s\n", c, input);
+          }
+        else if (c == ' ')
+          {
+            printw("\nend prediction: %s\n", input);
+            free(input);
+            input = strdup("");
+          }
+        else
+          {
+            input = (char*)realloc(input, sizeof(char)*(strlen(input)+2));
+            input = strcat(input, (char*)&c);
+          }
         if (verbose)
           {
-            fprintf(stdout, "Predicting %s...\n", input);
+            printw("\nPredicting %s...\n", input);
           }
         auto predictions = t->lookup_fd(input, MAX_PREDICTIONS, TIME_CUTOFF);
         unsigned int i = 0;
@@ -97,7 +106,7 @@ predict(hfst::HfstTransducer* t, bool verbose)
                     prediq << res;
                   }
               }
-            fprintf(stdout, "%u '%s' %f\n", i++, prediq.str().c_str(), p.first);
+            printw("%u '%s' %f\n", i++, prediq.str().c_str(), p.first);
             completions[i] = prediq.str();
           }
       }
@@ -107,6 +116,10 @@ int main(int argc, char **argv)
   {
     bool verbose = false;
     char* filename = NULL;
+    initscr();
+    cbreak();
+    nodelay(stdscr, false);
+    scrollok(stdscr, true);
     while (true)
       {
         static struct option long_options[] =
@@ -159,7 +172,7 @@ int main(int argc, char **argv)
       }
     if ((optind + 1) < argc)
       {
-        fprintf(stderr, "Unrecognised argument %s\n", argv[optind]);
+        printw("Unrecognised argument %s\n", argv[optind]);
         print_short_help();
         return EXIT_FAILURE;
       }
@@ -167,7 +180,7 @@ int main(int argc, char **argv)
       {
         if (filename != NULL)
           {
-            fprintf(stderr, "Unrecognised argument %s\n", argv[optind]);
+            printw("Unrecognised argument %s\n", argv[optind]);
             print_short_help();
             return EXIT_FAILURE;
           }
@@ -175,18 +188,18 @@ int main(int argc, char **argv)
       }
     else if (filename == NULL)
       {
-        fprintf(stderr, "Required argument -a missing\n");
+        printw("Required argument -a missing\n");
         print_short_help();
         return EXIT_FAILURE;
       }
     if (verbose)
       {
-        fprintf(stdout, "Reading predictor from %s...\n", filename);
+        printw("Reading predictor from %s...\n", filename);
       }
     auto fsa = load_predictor(filename);
     if (verbose)
       {
-        fprintf(stdout, "done!\nPredicting...\n");
+        printw("done!\nPredicting...\n");
       }
     try
       {
@@ -194,9 +207,10 @@ int main(int argc, char **argv)
       }
     catch (FunctionNotImplementedException& fnie)
       {
-        fprintf(stderr, "%s does not support predictions:\n%s\n", filename,
-                fnie().c_str());
+        printw("%s does not support predictions:\n%s\n", filename,
+               fnie().c_str());
       }
+    endwin();
     return EXIT_SUCCESS;
   }
 

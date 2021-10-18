@@ -1,22 +1,46 @@
 /*
  * Copyright (c) 2021 Divvun <https://divvun.org>, GPLv3
+ *
+ *
  */
 
-#if HAVE_CONFIG
+#if HAVE_CONFIG_H
 #include "config.h"
 #endif
+#include <stdlib.h>
 #include <hfst/hfst.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <ncurses.h>
 
 #define MAX_PREDICTIONS 10
-#define TIME_CUTOFF -1
+
+static const char* progname;
+
+void
+cleanup_curses()
+  {
+    endwin();
+    refresh();
+    int rv = system("stty sane"); // Ugly hack but works
+    if (rv != EXIT_SUCCESS)
+      {
+        fprintf(stderr, "terminal is probably messed up, say reset or stty "
+                "sane");
+      }
+  }
+
+void
+set_program_name(const char* s)
+ {
+   progname = s;
+ }
+
 
 void
 print_usage(void)
   {
-    fprintf(stderr,
+    printw(
         "\n"
         "Usage: %s [OPTIONS] TRANSDUCER\n"
         "Run interactive prediction on single transducer\n"
@@ -29,19 +53,19 @@ print_usage(void)
         "  -a, --predictor=TRANSDUCER   use TRANSDUCER to predict\n"
         "\n"
         "TRANSDUCER is required. Input read from stdin and output to stdout.\n"
-        "\n", PACKAGE_NAME);
+        "\n", progname);
   }
 
 void
 print_version(void)
   {
-    fprintf(stderr, "%s\n", PACKAGE_STRING);
+    printw("%s\n", progname);
   }
 
 void
 print_short_help(void)
   {
-    fprintf(stderr, "Use %s --help to find out more\n", PACKAGE_NAME);
+    printw("Use %s --help to find out more\n", progname);
   }
 
 hfst::HfstTransducer*
@@ -53,7 +77,7 @@ load_predictor(const char* filename)
   }
 
 void
-predict(hfst::HfstTransducer* t, bool verbose)
+predict(hfst::HfstTransducer* t, bool verbose, int cutoff)
   {
     printw("Enter alphabets or number to predict a morph, "
            "and space to finish the word, enter or ^C to quit.\n");
@@ -87,14 +111,24 @@ predict(hfst::HfstTransducer* t, bool verbose)
           }
         else
           {
-            input = (char*)realloc(input, sizeof(char)*(strlen(input)+2));
+            char* tmp = (char*)realloc(input, sizeof(char)*(strlen(input)+2));
+            if (tmp == NULL)
+              {
+                printw("Memory allocation fail!\n");
+                free(tmp);
+                return;
+              }
+            else
+              {
+                input = tmp;
+              }
             input = strcat(input, (char*)&c);
           }
         if (verbose)
           {
             printw("\nPredicting %s...\n", input);
           }
-        auto predictions = t->lookup_fd(input, MAX_PREDICTIONS, TIME_CUTOFF);
+        auto predictions = t->lookup_fd(input, MAX_PREDICTIONS, cutoff);
         unsigned int i = 0;
         for (auto& p : *predictions)
           {
@@ -109,13 +143,21 @@ predict(hfst::HfstTransducer* t, bool verbose)
             printw("%u '%s' %f\n", i++, prediq.str().c_str(), p.first);
             completions[i] = prediq.str();
           }
+        if (predictions->size() == 0)
+          {
+            printw("?");
+          }
       }
+    free(input);
   }
 
 int main(int argc, char **argv)
   {
+    set_program_name(argv[0]);
     bool verbose = false;
     char* filename = NULL;
+    int cutoff = -1;
+    char* endptr;
     initscr();
     cbreak();
     nodelay(stdscr, false);
@@ -130,10 +172,12 @@ int main(int argc, char **argv)
             {"quiet",        no_argument,       0, 'q'},
             {"silent",       no_argument,       0, 's'},
             {"predictor",    required_argument, 0, 'a'},
+            {"time-cutoff",  required_argument, 0, 't'},
             {0,              0,                 0,  0 }
           };
         int option_index = 0;
-        int c = getopt_long(argc, argv, "hVvqsa:", long_options, &option_index);
+        int c = getopt_long(argc, argv, "hVvqst:a:", long_options,
+                            &option_index);
 
         if (c == -1) // no more options to look at
           {
@@ -143,11 +187,13 @@ int main(int argc, char **argv)
           {
         case 'h':
             print_usage();
+            cleanup_curses();
             return EXIT_SUCCESS;
             break;
 
         case 'V':
             print_version();
+            cleanup_curses();
             return EXIT_SUCCESS;
             break;
 
@@ -164,16 +210,37 @@ int main(int argc, char **argv)
             filename = strdup(optarg);
             break;
 
+        case 't':
+            endptr = optarg;
+            cutoff = strtoul(optarg, &endptr, 10);
+            if (endptr == optarg)
+              {
+                printw("%s is not a number for time offset\n", optarg);
+                print_short_help();
+                cleanup_curses();
+                return EXIT_FAILURE;
+              }
+            else if (*endptr != '\0')
+              {
+                printw("%s is not a number for time offset\n", optarg);
+                print_short_help();
+                cleanup_curses();
+                return EXIT_FAILURE;
+              }
+            break;
         default:
+            printw("Unknown or wrong argument stuff %c\n", c);
             print_short_help();
-          return EXIT_FAILURE;
-          break;
+            cleanup_curses();
+            return EXIT_FAILURE;
+            break;
           }
       }
     if ((optind + 1) < argc)
       {
         printw("Unrecognised argument %s\n", argv[optind]);
         print_short_help();
+        cleanup_curses();
         return EXIT_FAILURE;
       }
     else if ((optind + 1) == argc)
@@ -182,6 +249,7 @@ int main(int argc, char **argv)
           {
             printw("Unrecognised argument %s\n", argv[optind]);
             print_short_help();
+            cleanup_curses();
             return EXIT_FAILURE;
           }
         filename = strdup(argv[optind]);
@@ -190,6 +258,7 @@ int main(int argc, char **argv)
       {
         printw("Required argument -a missing\n");
         print_short_help();
+        cleanup_curses();
         return EXIT_FAILURE;
       }
     if (verbose)
@@ -203,14 +272,15 @@ int main(int argc, char **argv)
       }
     try
       {
-        predict(fsa, verbose);
+        predict(fsa, verbose, cutoff);
       }
     catch (FunctionNotImplementedException& fnie)
       {
         printw("%s does not support predictions:\n%s\n", filename,
                fnie().c_str());
       }
-    endwin();
+    cleanup_curses();
+    free(filename);
     return EXIT_SUCCESS;
   }
 
